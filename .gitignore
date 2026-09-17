@@ -24,3 +24,6 @@ typesafe-*.tar
 
 # Env file
 .env
+
+# Dialyzer PLTs
+/priv/plts/
