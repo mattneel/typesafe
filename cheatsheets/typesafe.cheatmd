@@ -1,0 +1,321 @@
+# TypeSafe Cheatsheet
+
+## Setup
+{: .col-2}
+
+### Install
+
+```elixir
+# mix.exs
+{:typesafe, "~> 0.1.0"}
+```
+
+```console
+$ export TYPESAFE_API_KEY=...
+```
+
+### Build a client
+
+```elixir
+client = TypeSafe.new()
+client = TypeSafe.new(api_key: key, model: "jev-preview")
+client = TypeSafe.new(finch: [name: MyApp.Finch])
+```
+
+Options resolve in order: `new/1` option, `TYPESAFE_*` env var, `config :typesafe`, default.
+
+## Questions
+{: .col-2}
+
+### Noul (yes/no)
+
+```elixir
+TypeSafe.noul("Does this convey urgency?")
+
+TypeSafe.noul("Does this convey urgency?",
+  criteria: %{true: "Explicitly time-sensitive", false: "No urgency expressed"}
+)
+```
+
+### Choice (one of a set)
+
+```elixir
+# keyword list keeps option order
+TypeSafe.choice("Which team should handle this?",
+  billing: "Payments, invoicing, refunds",
+  technical: "Bugs, outages, integrations",
+  other: nil
+)
+
+TypeSafe.choice("Tone?", [:calm, :angry])
+TypeSafe.choice("Tone?", %{calm: nil, angry: nil})
+```
+
+### Score (ordered levels)
+
+```elixir
+TypeSafe.score("How frustrated is the customer?",
+  ["Calm", "Frustrated", "Very angry"]
+)
+```
+
+At least two levels. Levels cannot be `nil`.
+
+### Structured JSON and extra fields
+
+```elixir
+TypeSafe.choice(
+  %{task: "Route the ticket", notes: ["Prefer billing for charges"]},
+  [billing: %{covers: ["refunds", "charges"]}, other: nil],
+  extra: %{"future_field" => true}
+)
+```
+
+### Tuple-returning constructors
+
+```elixir
+{:ok, q} = TypeSafe.Question.Noul.new("Is this spam?")
+{:ok, q} = TypeSafe.Question.Choice.new("Tone?", [:calm, :angry])
+{:error, %TypeSafe.Error{type: :invalid_request}} =
+  TypeSafe.Question.Score.new("Urgency?", ["Only one"])
+```
+
+## Asking
+{: .col-2}
+
+### ask/4
+
+```elixir
+{:ok, response} =
+  TypeSafe.ask(client, "Help! My payouts are failing.", %{
+    is_urgent: TypeSafe.noul("Does this convey urgency?")
+  })
+```
+
+State can be a string, map or list. Questions can be a map or keyword list.
+
+### ask!/4
+
+```elixir
+response = TypeSafe.ask!(client, state, questions)
+# raises %TypeSafe.Error{} on failure
+```
+
+### Per-call options
+
+```elixir
+TypeSafe.ask(client, state, questions,
+  model: "jev-preview",
+  timeout: 20_000,
+  retry: false,
+  headers: [{"x-trace-id", trace_id}],
+  telemetry_metadata: %{ticket_id: 42}
+)
+```
+
+### list_models/2
+
+```elixir
+{:ok, [%TypeSafe.Model{name: "jev-latest"} | _]} =
+  TypeSafe.list_models(client)
+```
+
+## Answers
+{: .col-2}
+
+### Noul
+
+```elixir
+answer.noul                                #=> 0.95
+TypeSafe.Answer.Noul.yes?(answer)          #=> true (>= 0.5)
+TypeSafe.Answer.Noul.yes?(answer, 0.97)    #=> false
+```
+
+### Choice
+
+```elixir
+answer.choice          #=> :billing
+answer.probabilities   #=> %{billing: 0.87, technical: 0.13, sales: 0.0}
+answer.confidence      #=> 0.81
+
+TypeSafe.Answer.Choice.ranked(answer)
+#=> [billing: 0.87, technical: 0.13, sales: 0.0]
+TypeSafe.Answer.Choice.margin(answer)
+#=> 0.74
+```
+
+### Score
+
+```elixir
+answer.score           #=> 1.05
+answer.legend          #=> %{0 => "Calm", 1 => "Frustrated", 2 => "Very angry"}
+answer.probabilities   #=> %{0 => 0.0, 1 => 0.95, 2 => 0.05}
+answer.confidence      #=> 0.93
+
+TypeSafe.Answer.Score.expected_level(answer)  #=> {1, "Frustrated"}
+TypeSafe.Answer.Score.max_level(answer)       #=> {1, "Frustrated"}
+TypeSafe.Answer.Score.ranked(answer)          #=> [{1, 0.95}, {2, 0.05}, {0, 0.0}]
+```
+
+### Response
+
+```elixir
+response.answers.is_urgent              # keyed by your ids
+response.model                          #=> "jev-1.13.0"
+response.usage                          #=> %TypeSafe.Usage{input_tokens: 414, output_tokens: 73}
+response.request_id                     #=> "req_01a0..."
+response.raw                            # decoded JSON body
+
+TypeSafe.Response.fetch!(response, :is_urgent)
+TypeSafe.Response.fetch(response, :missing)   #=> :error
+TypeSafe.Response.nouls(response)             # also choices/1, scores/1
+```
+
+## Errors
+{: .col-2}
+
+### Matching
+
+```elixir
+case TypeSafe.ask(client, state, questions) do
+  {:ok, response} -> response
+  {:error, %TypeSafe.Error{type: :rate_limited, retry_after_ms: ms}} -> {:later, ms}
+  {:error, %TypeSafe.Error{type: :invalid_request, path: path}} -> {:bug, path}
+  {:error, %TypeSafe.Error{} = error} -> {:error, Exception.message(error)}
+end
+
+TypeSafe.Error.retryable?(error)
+```
+
+### Types
+
+| `type` | Cause | Retried |
+| --- | --- | --- |
+| `:invalid_request` | failed validation before sending | no |
+| `:bad_request` | HTTP 400 | no |
+| `:authentication` | HTTP 401 | no |
+| `:permission_denied` | HTTP 403 | no |
+| `:not_found` | HTTP 404 | no |
+| `:unprocessable` | HTTP 422 | no |
+| `:rate_limited` | HTTP 429 | yes |
+| `:overloaded` | HTTP 529 | yes |
+| `:server` | other 5xx | yes |
+| `:api` | other non-2xx | no |
+| `:transport` | connection failure or pool timeout | yes |
+| `:timeout` | request timed out | yes |
+| `:invalid_response` | 2xx body failed decoding | no |
+
+## Configuration
+{: .col-2}
+
+### Client options
+
+| Option | Env var | Default |
+| --- | --- | --- |
+| `:api_key` | `TYPESAFE_API_KEY` | required |
+| `:base_url` | `TYPESAFE_BASE_URL` | `"https://api.typesafe.ai"` |
+| `:model` | `TYPESAFE_DEFAULT_MODEL` | `"jev-latest"` |
+| `:timeout` | | `10_000` ms (receive) |
+| `:retry` | | `%TypeSafe.Retry{}` |
+| `:headers` | | `[]` |
+| `:finch` | | Req's default pool |
+| `:req_options` | | `[]` (merged with config) |
+
+### Retry policy
+
+```elixir
+TypeSafe.new(retry: false)
+TypeSafe.new(retry: [max_retries: 4, budget_ms: 60_000])
+```
+
+| Option | Default |
+| --- | --- |
+| `:max_retries` | `2` |
+| `:backoff_initial_ms` | `500` |
+| `:backoff_max_ms` | `5_000` |
+| `:jitter` | `0.25` |
+| `:statuses` | `[408, 429, 500..599]` |
+| `:respect_retry_after` | `true` |
+| `:max_retry_after_ms` | `60_000` |
+| `:retry_transport_errors` | `true` |
+| `:budget_ms` | `30_000` |
+
+### Application config
+
+```elixir
+# config/runtime.exs
+config :typesafe,
+  api_key: System.get_env("TYPESAFE_API_KEY"),
+  model: "jev-latest"
+```
+
+### Telemetry events
+
+| Event | Notes |
+| --- | --- |
+| `[:typesafe, :request, :start]` | once per call |
+| `[:typesafe, :request, :stop]` | `:duration`, tokens; `:result`, `:retries`, `:error` |
+| `[:typesafe, :request, :exception]` | only on a raise |
+
+## Testing
+{: .col-2}
+
+### config/test.exs
+
+```elixir
+config :typesafe,
+  api_key: "test",
+  retry: false,
+  req_options: [plug: {Req.Test, TypeSafe}]
+```
+
+### Stub answers
+
+```elixir
+TypeSafe.Test.stub_answers(%{
+  is_urgent: {:noul, 0.92},
+  department: {:choice, :technical,
+    %{billing: 0.08, technical: 0.85, sales: 0.07}, 0.82},
+  frustration: {:score, 1.6, ["Calm", "Frustrated", "Very angry"],
+    %{0 => 0.05, 1 => 0.3, 2 => 0.65}, 0.78}
+})
+```
+
+### Stub failures
+
+```elixir
+TypeSafe.Test.stub_error(429, retry_after_ms: 1200)
+TypeSafe.Test.stub_error(422, body: %{"detail" => "..."})
+TypeSafe.Test.stub_transport_error(:timeout)
+TypeSafe.Test.stub_models([%{name: "jev-latest"}])
+```
+
+### Sequences and other processes
+
+```elixir
+Req.Test.expect(TypeSafe, TypeSafe.Test.error_plug(529))
+Req.Test.expect(TypeSafe, TypeSafe.Test.answers_plug(%{is_urgent: {:noul, 0.9}}))
+
+Req.Test.allow(TypeSafe, self(), pid)
+```
+
+## Tools
+{: .col-2}
+
+### JSON Schemas
+
+```console
+$ mix typesafe.schema
+$ mix typesafe.schema --output schemas/typesafe
+$ mix typesafe.schema --check
+```
+
+### Existing Req pipelines
+
+```elixir
+req = TypeSafe.Req.attach(Req.new(), api_key: key)
+
+req
+|> Req.post(typesafe_state: text, typesafe_questions: questions)
+|> TypeSafe.Req.decode(questions)
+```

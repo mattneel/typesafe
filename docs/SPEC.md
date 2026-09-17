@@ -4,7 +4,7 @@ Status: draft · Last updated 2026-09-16
 
 ## Summary
 
-`typesafe` is a Hex package that gives Elixir apps a typed client for TypeSafe's System One API (the Jev model): build Choice, Noul and Score questions, send them with application state in one request, and get back structs carrying probabilities that your code combines. It should read like an official SDK: one facade module, plain structs, Req underneath, Zoi schemas for every payload, Telemetry events, and a testing story built on `Req.Test`.
+`typesafe` is a Hex package that gives Elixir apps a typed client for TypeSafe's System One API (the Jev model): build Choice, Noul and Score questions, send them with application state in one request, and get back structs carrying probabilities that your code combines. It should feel complete and idiomatic (it is a community client, not an official TypeSafe SDK): one facade module, plain structs, Req underneath, Zoi schemas for every payload, Telemetry events, and a testing story built on `Req.Test`.
 
 Design principles:
 
@@ -198,8 +198,8 @@ Req.new(
   base_url: base_url,                          # default https://api.typesafe.ai
   auth: {:bearer, api_key},                    # redacted by Req in logs and inspect
   headers: [
-    {"user-agent", "typesafe-sdk/0.1.0"},      # the exact values the Python and JS SDKs send
-    {"x-typesafe-sdk", "typesafe-sdk/0.1.0"},
+    {"user-agent", "typesafe-elixir/0.1.0"},   # official SDKs' format, own name: this is not an official SDK
+    {"x-typesafe-sdk", "typesafe-elixir/0.1.0"},
     {"x-typesafe-runtime", "elixir/1.20.4 (otp/29; linux; x86_64)"}
   ],
   receive_timeout: timeout,                    # default 10_000 ms, the official per-operation timeout
@@ -214,7 +214,7 @@ Req.new(
 |> Req.merge(user_req_options)                 # config :typesafe, req_options: [...] wins last
 ```
 
-Identification: the three headers carry the values both official SDKs send (`typesafe-sdk/<version>` twice, plus a runtime string in their `<runtime>/<version> (<platform>; <arch>)` shape), and `x-typesafe-retry-count` is added by a request step that reads Req's `:req_retry_count` private on every attempt after the first. Transport: api.typesafe.ai negotiated HTTP/2 over ALPN on 2026-09-16, but the client keeps Req's default HTTP/1 Finch pool, whose per-connection timeouts and retries are the well-trodden path; the telemetry guide shows the one-line `finch: [name: ...]` configuration for teams that want an `:http2` pool at high concurrency.
+Identification: the three headers use the shape both official SDKs send (an SDK identifier twice, plus a runtime string in their `<runtime>/<version> (<platform>; <arch>)` shape), but identify this package as `typesafe-elixir/<version>` rather than the official `typesafe-sdk/<version>`, since it is not an official SDK, and `x-typesafe-retry-count` is added by a request step that reads Req's `:req_retry_count` private on every attempt after the first. Transport: api.typesafe.ai negotiated HTTP/2 over ALPN on 2026-09-16, but the client keeps Req's default HTTP/1 Finch pool, whose per-connection timeouts and retries are the well-trodden path; the telemetry guide shows the one-line `finch: [name: ...]` configuration for teams that want an `:http2` pool at high concurrency.
 
 Retry policy, as a `TypeSafe.Retry` struct with the official defaults: `max_retries: 2`, `backoff_initial_ms: 500`, `backoff_max_ms: 5_000`, `jitter: 0.25`, `statuses: [408, 429 | 500..599]` (so 529 Overloaded is covered), `respect_retry_after: true`, `retry_transport_errors: true`, `budget_ms: 30_000`. `decide/3` returns `{:delay, ms}` when a `retry-after-ms` or `Retry-After` header is present, `true` for a retryable status or `%Req.TransportError{}`, and `false` otherwise; it also returns `false` once `System.monotonic_time` minus the start stamp stored in `request.private[:typesafe_started_at]` would cross the budget, which is how the 30 s cap is enforced without a second timer. Req's built-in `:safe_transient` mode only retries GET and HEAD, so the function form is required for this POST endpoint; the evaluation call has no side effects, which is what makes retrying it safe. Users can pass `retry: false` or a `%TypeSafe.Retry{}` per client or per call.
 
@@ -343,10 +343,10 @@ def project do
     version: "0.1.0",
     elixir: "~> 1.18",
     name: "TypeSafe",
-    source_url: "https://github.com/typesafe-ai/typesafe-elixir",
-    homepage_url: "https://docs.typesafe.ai",
-    description: "Official Elixir client for the TypeSafe System One API (Jev): typed Choice, Noul and Score judgments for your code.",
-    package: [licenses: ["MIT"], links: %{"Docs" => "https://docs.typesafe.ai", "GitHub" => "..."}, files: ~w(lib priv guides mix.exs README.md CHANGELOG.md LICENSE)],
+    source_url: "https://github.com/mattneel/typesafe",
+    homepage_url: "https://github.com/mattneel/typesafe",
+    description: "Elixir client for the TypeSafe System One API (Jev): typed Choice, Noul and Score judgments for your code.",
+    package: [licenses: ["MIT"], links: %{"GitHub" => "https://github.com/mattneel/typesafe", "TypeSafe API docs" => "https://docs.typesafe.ai"}, files: ~w(lib priv guides mix.exs README.md CHANGELOG.md LICENSE)],
     docs: [main: "readme", extras: ~w(README.md CHANGELOG.md guides/getting-started.md guides/questions.md guides/confidence.md guides/testing.md guides/telemetry.md),
            groups_for_modules: [Questions: ~r/Question/, Answers: ~r/Answer/, Transport: [TypeSafe.Client, TypeSafe.Retry, TypeSafe.Req], Testing: [TypeSafe.Test]]],
     dialyzer: [plt_add_apps: [:ex_unit, :plug], plt_local_path: "priv/plts"]
@@ -374,7 +374,7 @@ Versioning and publishing:
 
 - SemVer with 0.x until the API reference stops changing shape; any wire-level change to answers is at least a minor bump and a CHANGELOG entry in Keep a Changelog format.
 - The user agent embeds the package version from `Mix.Project.config()[:version]` at compile time so support can tell SDK versions apart from server logs.
-- Release checklist, kept in `RELEASING.md`: bump version and CHANGELOG, `mix hex.build` and inspect the tarball, `mix docs` and open locally, tag `v0.1.0`, `mix hex.publish`, then publish docs. Add `typesafe` to the Hex organisation with two owners so the package is never single-maintainer.
+- Release checklist, kept in `RELEASING.md`: bump version and CHANGELOG, `mix hex.build` and inspect the tarball, `mix docs` and open locally, tag `v0.1.0`, `mix hex.publish`, then publish docs. Give `typesafe` at least two Hex owners (`mix hex.owner add`), or move it to a Hex organisation the maintainer controls, so the package is never single-maintainer.
 - Deprecations go through `IO.warn/2` with a `since:` note and stay for at least one minor version.
 
 ## Roadmap and decisions
