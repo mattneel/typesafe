@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "POST /v1/systemone request body",
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "questions": {
+      "additionalProperties": {
+        "discriminator": {
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "additionalProperties": true,
+            "properties": {
+              "criteria": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "additionalProperties": true,
+                    "properties": {
+                      "false": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object"
+                          },
+                          {
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "true": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object"
+                          },
+                          {
+                            "type": "array"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [],
+                    "type": "object"
+                  }
+                ]
+              },
+              "instructions": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "const": "noul"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "criteria": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "minProperties": 1,
+                "propertyNames": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "instructions": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "const": "choice"
+              }
+            },
+            "required": [
+              "criteria",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "criteria": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "array"
+                    }
+                  ]
+                },
+                "minItems": 2,
+                "type": "array"
+              },
+              "instructions": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object"
+                  },
+                  {
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "const": "score"
+              }
+            },
+            "required": [
+              "criteria",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        },
+        {
+          "type": "array"
+        }
+      ]
+    }
+  },
+  "required": [
+    "model",
+    "questions",
+    "state"
+  ],
+  "title": "SystemOneRequest",
+  "type": "object"
+}

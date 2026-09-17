@@ -1,0 +1,36 @@
+version: 2
+updates:
+  - package-ecosystem: mix
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Dev/test-only tooling is batched into one PR; runtime deps (req, zoi, telemetry, plug)
+      # each get their own PR because they change what users of the package resolve.
+      dev-tooling:
+        patterns:
+          - credo
+          - dialyxir
+          - ex_doc
+          - ex_dna
+          - ex_slop
+          - reach
+          - stream_data
+          - styler
+          - vibe_kit
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "GET /v1/models response body",
+  "properties": {
+    "models": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "description": {
+            "description": "Human-readable description of the model.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Model name or alias accepted by the `model` option.",
+            "type": "string"
+          },
+          "release_date": {
+            "description": "Release date as an ISO 8601 string.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "release_date"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "models"
+  ],
+  "title": "ModelMetadataList",
+  "type": "object"
+}

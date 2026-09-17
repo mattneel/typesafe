@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "description": "POST /v1/systemone response body",
+  "properties": {
+    "answers": {
+      "additionalProperties": {
+        "discriminator": {
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "additionalProperties": true,
+            "properties": {
+              "noul": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "type": {
+                "const": "noul"
+              }
+            },
+            "required": [
+              "noul",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "choice": {
+                "type": "string"
+              },
+              "confidence": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "probabilities": {
+                "additionalProperties": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              "type": {
+                "const": "choice"
+              }
+            },
+            "required": [
+              "choice",
+              "confidence",
+              "probabilities",
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "confidence": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "legend": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object"
+                    },
+                    {
+                      "type": "array"
+                    }
+                  ]
+                },
+                "propertyNames": {
+                  "pattern": "^[0-9]+$",
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "probabilities": {
+                "additionalProperties": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "propertyNames": {
+                  "pattern": "^[0-9]+$",
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "score": {
+                "type": "number"
+              },
+              "type": {
+                "const": "score"
+              }
+            },
+            "required": [
+              "confidence",
+              "legend",
+              "probabilities",
+              "score",
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "object"
+    },
+    "model": {
+      "type": "string"
+    },
+    "usage": {
+      "additionalProperties": true,
+      "properties": {
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "description": "Billable input tokens.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "description": "Billable input tokens."
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "description": "Output tokens (currently free of charge).",
+              "minimum": 0,
+              "type": "integer"
+            }
+          ],
+          "description": "Output tokens (currently free of charge)."
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  "required": [
+    "answers",
+    "model"
+  ],
+  "title": "SystemOneResponse",
+  "type": "object"
+}
