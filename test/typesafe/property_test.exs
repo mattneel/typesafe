@@ -199,6 +199,11 @@ defmodule TypeSafe.PropertyTest do
 
   ## Generators
 
+  # StreamData.map_of/3 needs that many unique keys and raises TooManyDuplicatesError when the key
+  # space is small (a handful of literal keys, or short text at small sizes). Building a list of
+  # pairs and letting Map.new/1 drop duplicates keeps every shape while never failing to generate.
+  defp map_up_to(key, value, opts), do: map(list_of(tuple({key, value}), opts), &Map.new/1)
+
   defp text, do: string(:printable, max_length: 12)
 
   defp key do
@@ -217,7 +222,7 @@ defmodule TypeSafe.PropertyTest do
     one_of([
       term(),
       improper,
-      map_of(text(), improper, min_length: 1, max_length: 2),
+      map_up_to(text(), improper, min_length: 1, max_length: 2),
       list_of(improper, min_length: 1, max_length: 2)
     ])
   end
@@ -233,11 +238,11 @@ defmodule TypeSafe.PropertyTest do
 
   defp json_value do
     json_scalar()
-    |> tree(fn child -> one_of([list_of(child, max_length: 3), map_of(text(), child, max_length: 3)]) end)
+    |> tree(fn child -> one_of([list_of(child, max_length: 3), map_up_to(text(), child, max_length: 3)]) end)
     |> scale(&min(&1, 12))
   end
 
-  defp json_object, do: map_of(text(), json_value(), max_length: 3)
+  defp json_object, do: map_up_to(text(), json_value(), max_length: 3)
 
   defp json_array, do: list_of(json_value(), max_length: 3)
 
@@ -336,7 +341,7 @@ defmodule TypeSafe.PropertyTest do
   end
 
   defp extra_fields,
-    do: map_of(map(string(:alphanumeric, min_length: 1, max_length: 8), &("x_" <> &1)), json_value(), max_length: 2)
+    do: map_up_to(map(string(:alphanumeric, min_length: 1, max_length: 8), &("x_" <> &1)), json_value(), max_length: 2)
 
   # Decoding only ever sees JSON, so the malformed input stays JSON-shaped: string keys and
   # JSON values in the wrong places.
@@ -345,10 +350,10 @@ defmodule TypeSafe.PropertyTest do
       "type" => one_of([member_of(["noul", "choice", "score"]), json_value()]),
       "noul" => one_of([probability(), huge_integer(), json_value()]),
       "choice" => json_value(),
-      "probabilities" => one_of([map_of(text(), probability(), max_length: 3), json_value()]),
+      "probabilities" => one_of([map_up_to(text(), probability(), max_length: 3), json_value()]),
       "confidence" => one_of([probability(), huge_integer(), json_value()]),
       "score" => one_of([float(), huge_integer(), json_value()]),
-      "legend" => one_of([map_of(member_of(["0", "1", "-1", "x"]), json_value(), max_length: 3), json_value()])
+      "legend" => one_of([map_up_to(member_of(["0", "1", "-1", "x"]), json_value(), max_length: 3), json_value()])
     }
 
     one_of([optional_map(fields), json_value()])
@@ -357,7 +362,7 @@ defmodule TypeSafe.PropertyTest do
   defp wire_like_body do
     optional_map(%{
       "model" => json_value(),
-      "answers" => one_of([map_of(text(), wire_like_answer(), max_length: 3), json_value()]),
+      "answers" => one_of([map_up_to(text(), wire_like_answer(), max_length: 3), json_value()]),
       "usage" => one_of([optional_map(%{"input_tokens" => json_value(), "output_tokens" => integer()}), json_value()])
     })
   end

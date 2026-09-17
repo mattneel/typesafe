@@ -48,7 +48,7 @@ defmodule TypeSafe.JSONTest do
 
     test "returns an error for invalid UTF-8" do
       assert {:error, exception} = TJSON.encode(TJSON.object([{"text", <<0xFF>>}]))
-      assert is_exception(exception)
+      assert Exception.message(exception) =~ "invalid_byte"
     end
 
     test "encode!/1 raises" do
