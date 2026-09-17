@@ -1,0 +1,271 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same PR or branch cancels the run in progress. On master every commit keeps
+# its own result (runs queue instead of cancelling) so a red commit can always be pinpointed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  # Newest supported pair, used by the req-compat and static jobs. Keep in sync with the last
+  # entry of the test matrix below and with .github/workflows/live.yml.
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "29.0.6"
+
+jobs:
+  test:
+    name: Test (Elixir ${{ matrix.elixir }}, OTP ${{ matrix.otp }})
+    # Pinned rather than ubuntu-latest: setup-beam downloads OTP builds made for this exact image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Minimum supported pair (mix.exs: elixir: "~> 1.18").
+          - elixir: "1.18.5"
+            otp: "27.3.4.17"
+          - elixir: "1.19.6"
+            otp: "28.5.0.6"
+          # Newest pair; coverage (and its 90% threshold from mix.exs) is enforced here only.
+          - elixir: "1.20.4"
+            otp: "29.0.6"
+            coverage: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}-test-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}-test-
+
+      - name: Fetch dependencies
+        run: mix deps.get
+
+      # --force recompiles this project (not deps) so warnings are never hidden by a cached _build.
+      - name: Compile
+        run: mix compile --warnings-as-errors --force
+
+      - name: Run tests
+        if: ${{ !matrix.coverage }}
+        run: mix test --warnings-as-errors
+
+      - name: Run tests with coverage
+        if: ${{ matrix.coverage }}
+        run: mix test --warnings-as-errors --cover
+
+      - name: Upload coverage report
+        if: ${{ matrix.coverage && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: cover/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  req-compat:
+    name: Req ${{ matrix.req }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Both legs are required. The pre-release is pinned exactly ("0.8.0-rc.0", not a range), so it
+    # cannot change underneath us: a red rc leg means our code broke against the 0.8 API that
+    # mix.exs already claims to support ("~> 0.7.4 or ~> 0.8"). If a future rc ever needs to be
+    # tolerated while we catch up, add `continue-on-error: true` for that leg only. Replace the rc
+    # with "~> 0.8" once 0.8.0 is released (docs/SPEC.md: "until 0.8 is stable").
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - req: "~> 0.7.4"
+            slug: "0.7"
+          - req: "0.8.0-rc.0"
+            slug: "0.8.0-rc.0"
+    env:
+      MIX_ENV: test
+      # Read by mix.exs to override the req requirement.
+      TYPESAFE_CI_REQ_VERSION: ${{ matrix.req }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-req${{ matrix.slug }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-req${{ matrix.slug }}-
+
+      # Unlocks only req and resolves the newest release matching TYPESAFE_CI_REQ_VERSION; other locked deps
+      # stay as committed.
+      - name: Resolve req ${{ matrix.req }}
+        run: |
+          mix deps.update req
+          mix deps.get
+
+      - name: Show resolved req version
+        run: mix deps | grep -A2 '^\* req '
+
+      - name: Compile
+        run: mix compile --warnings-as-errors --force
+
+      - name: Run tests
+        run: mix test --warnings-as-errors
+
+  static:
+    name: Static analysis, docs and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Mirrors the `mix ci` alias, which runs in MIX_ENV=test (mix.exs cli/0 preferred_envs), so
+    # dialyzer and the PLT cache below are for the test env. Docs and packaging switch to dev.
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-static-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-static-
+
+      # deps.get fetches the dependencies of every env, so dev-only ex_doc is available later.
+      - name: Fetch dependencies
+        run: mix deps.get
+
+      - name: Compile
+        id: compile
+        run: mix compile --warnings-as-errors --force
+
+      # Every check below runs even when an earlier one fails, so one push reports all problems.
+      - name: Check for unused dependencies in mix.lock
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix deps.unlock --check-unused
+
+      - name: Check formatting (Styler)
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix format --check-formatted
+
+      - name: Credo
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix credo --strict
+
+      - name: Code duplication (ExDNA)
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix ex_dna --max-clones 0
+
+      # `mix reach.check --arch --smells` (as in the `mix ci` alias) only runs --arch: the task
+      # dispatches on the first flag it finds. Run them separately. --smells is advisory and
+      # exits 0 even when it reports findings.
+      - name: Architecture policy (Reach)
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix reach.check --arch
+
+      - name: Code smells (Reach, advisory)
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix reach.check --smells
+
+      - name: Audit for retired Hex packages
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix hex.audit
+
+      - name: Check committed JSON Schemas are up to date
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        run: mix typesafe.schema --check
+
+      - name: Restore PLT cache
+        id: plt-cache
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-${{ env.MIX_ENV }}-
+
+      # On a partial restore (mix.lock changed) this only adds or removes the changed apps.
+      - name: Build PLT
+        id: plt-build
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.plt-cache.outputs.cache-hit != 'true' }}
+        run: mix dialyzer --plt
+
+      # Saved before dialyzer runs so a dialyzer failure does not throw away a freshly built PLT.
+      - name: Save PLT cache
+        if: ${{ !cancelled() && steps.plt-build.outcome == 'success' }}
+        uses: actions/cache/save@v6
+        with:
+          path: priv/plts
+          key: ${{ steps.plt-cache.outputs.cache-primary-key }}
+
+      - name: Dialyzer
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && steps.plt-build.outcome != 'failure' }}
+        run: mix dialyzer --format github --format dialyxir
+
+      - name: Build docs
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        env:
+          MIX_ENV: dev
+        run: mix docs --warnings-as-errors
+
+      - name: Build Hex package
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        env:
+          MIX_ENV: dev
+          PACKAGE_DIR: ${{ runner.temp }}/package
+        run: |
+          mix hex.build --unpack --output "$PACKAGE_DIR"
+          cd "$PACKAGE_DIR"
+          status=0
+          for path in mix.exs README.md CHANGELOG.md LICENSE lib priv/json_schema guides cheatsheets; do
+            if [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+              echo "::error title=Hex package::$path is missing or empty in the package"
+              status=1
+            fi
+          done
+          for path in priv/plts test docs .env _build deps; do
+            if [ -e "$path" ]; then
+              echo "::error title=Hex package::$path must not be shipped in the package"
+              status=1
+            fi
+          done
+          find . -type f | sort
+          exit "$status"

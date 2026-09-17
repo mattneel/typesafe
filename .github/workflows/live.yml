@@ -1,0 +1,108 @@
+name: Live API
+
+on:
+  schedule:
+    # Daily at 06:17 UTC (off the hour to avoid the top-of-hour scheduling backlog).
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  # Newest supported pair; keep in sync with .github/workflows/ci.yml.
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "29.0.6"
+
+jobs:
+  # Secrets cannot be used in a job-level `if`, so a tiny job checks for the key and the live job
+  # is skipped (not failed) when it is absent. The repository guard keeps forks, which have no
+  # secret and must not spend anyone's API quota, from running this at all.
+  api-key:
+    name: Check for TYPESAFE_API_KEY
+    if: github.repository == 'mattneel/typesafe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      present: ${{ steps.check.outputs.present }}
+    steps:
+      - id: check
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: |
+          if [ -n "$TYPESAFE_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Live tests skipped::The TYPESAFE_API_KEY repository secret is not set."
+          fi
+
+  live:
+    name: Live tests
+    needs: api-key
+    if: needs.api-key.outputs.present == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+          version-type: strict
+
+      - name: Cache deps and _build
+        uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-test-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-otp${{ env.OTP_VERSION }}-elixir${{ env.ELIXIR_VERSION }}-test-
+
+      - name: Fetch dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      # The key is only exposed to this step, not to dependency fetching or compilation.
+      - name: Run live tests
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: mix test --only live
+
+      # Each run rewrites test/fixtures/live, so a diff against the committed fixtures shows wire
+      # format changes at a glance.
+      - name: Summarise fixture changes
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### Live fixtures"
+            if git diff --quiet -- test/fixtures/live && [ -z "$(git ls-files --others --exclude-standard -- test/fixtures/live)" ]; then
+              echo "No changes against the committed fixtures."
+            else
+              echo "Recorded responses differ from the committed fixtures:"
+              echo '```diff'
+              git diff -- test/fixtures/live
+              git ls-files --others --exclude-standard -- test/fixtures/live | sed 's/^/new file: /'
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recorded fixtures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-fixtures
+          path: test/fixtures/live
+          if-no-files-found: warn
+          retention-days: 30
